@@ -11,35 +11,57 @@ fi
 
 VOT_CLI="$HOME/.local/share/vot-mpv/vot-cli.js"
 FMT="$HOME/.local/share/vot-mpv/integrations/ytv-fmt"
+THUMB_DIR="$HOME/.cache/vot/thumbs"
+CONF="$HOME/.config/mpv/script-opts/vot.conf"
 RESULTS=$(mktemp /tmp/ytv-results.XXXXXX)
 trap "rm -f $RESULTS" EXIT
 
-echo "Шукаємо: $QUERY"
-yt-dlp "ytsearch20:$QUERY" \
-  --print "%(id)s	%(title)s	%(uploader)s	%(duration_string)s" \
-  --no-playlist \
-  --quiet \
-  2>/dev/null > "$RESULTS"
-
-if [ ! -s "$RESULTS" ]; then
-  echo "Нічого не знайдено"
-  exit 1
+QUALITY=$(grep "^quality=" "$CONF" 2>/dev/null | cut -d= -f2 | tr -d ' ')
+QUALITY="${QUALITY:-1080}"
+if [ "$QUALITY" = "best" ]; then
+  YTDL_FORMAT="bestvideo+bestaudio/best"
+else
+  YTDL_FORMAT="bestvideo[height<=${QUALITY}]+bestaudio/best[height<=${QUALITY}]"
 fi
 
-SELECTED=$("$FMT" "$RESULTS" | fzf \
-  --delimiter=$'\t' \
-  --with-nth=1 \
-  --prompt="ytv › " \
-  --header="Enter = відкрити в mpv   Ctrl+A = додати в бібліотеку   ★ = вже є в бібліотеці" \
-  --height=70% \
-  --border=rounded \
-  --bind "ctrl-a:execute-silent(
-    id=\$(echo {} | cut -f2);
-    node \"$VOT_CLI\" add \"https://www.youtube.com/watch?v=\$id\"
-  )+reload(\"$FMT\" \"$RESULTS\")" \
-)
+mkdir -p "$THUMB_DIR"
+
+# Preview: download thumbnail and show via kitty icat
+PREVIEW='
+  id=$(echo {} | cut -f2)
+  [ -z "$id" ] && exit 0
+  cache="'"$THUMB_DIR"'/${id}.jpg"
+  [ -f "$cache" ] || curl -s "https://img.youtube.com/vi/${id}/mqdefault.jpg" -o "$cache" 2>/dev/null
+  [ -f "$cache" ] && kitten icat --clear --stdin=no --transfer-mode=file \
+    --place "${FZF_PREVIEW_COLUMNS}x${FZF_PREVIEW_LINES}@0x0" "$cache" 2>/dev/null
+'
+
+# Stream results: yt-dlp outputs line by line via --lazy-playlist,
+# tee saves to file (for reload), formatter adds ★ markers in real time
+yt-dlp --lazy-playlist "ytsearch20:$QUERY" \
+  --print "%(id)s	%(title)s	%(uploader)s	%(duration_string)s" \
+  --no-playlist --quiet 2>/dev/null \
+  | tee "$RESULTS" \
+  | "$FMT" \
+  | fzf \
+    --delimiter=$'\t' \
+    --with-nth=1 \
+    --prompt="ytv › " \
+    --header="Enter = відкрити в mpv   Ctrl+A = додати в бібліотеку   ★ = вже є" \
+    --height=100% \
+    --border=rounded \
+    --preview "$PREVIEW" \
+    --preview-window=right:40%:wrap \
+    --bind "ctrl-a:execute-silent(
+      id=\$(echo {} | cut -f2);
+      node \"$VOT_CLI\" add \"https://www.youtube.com/watch?v=\$id\"
+    )+reload(\"$FMT\" \"$RESULTS\")" \
+  > /tmp/ytv-selected.$$
+
+SELECTED=$(cat /tmp/ytv-selected.$$)
+rm -f /tmp/ytv-selected.$$
 
 [ -z "$SELECTED" ] && exit 0
 
 ID=$(echo "$SELECTED" | cut -f2)
-mpv "https://www.youtube.com/watch?v=$ID"
+mpv --ytdl-format="$YTDL_FORMAT" "https://www.youtube.com/watch?v=$ID"
