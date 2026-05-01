@@ -8,6 +8,7 @@ local opts = {
     autoTranslate = false,
     skipLangs = "ru",
     quality = "1080",
+    search_limit = "20",
     vot_bin = "/usr/bin/node",
     vot_script = home .. "/.local/share/vot-mpv/vot-translate.js",
 }

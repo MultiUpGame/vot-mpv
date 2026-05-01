@@ -390,11 +390,6 @@ async function cmdFetch(id) {
   console.log(ok ? "✓ Готово" : "✗ Провал");
 }
 
-function bar(done, total, width = 24) {
-  const filled = total > 0 ? Math.round((done / total) * width) : 0;
-  return "█".repeat(filled) + "░".repeat(width - filled);
-}
-
 async function cmdFetchAll() {
   const lib = loadLib();
   const toFetch = lib.videos.filter(v => !hasCachedTranslation(v.id, !!(v.videoPath)));
@@ -412,11 +407,11 @@ async function cmdFetchAll() {
   for (let i = 0; i < total; i++) {
     const v = toFetch[i];
     const label = `[${String(i + 1).padStart(pad)}/${total}]`;
-    const title = v.title.slice(0, 48).padEnd(49);
-    process.stdout.write(`${label} ${bar(i, total)}  ${title}  `);
+    const title = v.title.slice(0, 55).padEnd(56);
+    process.stdout.write(`${label} ${title}`);
 
     const ok = await fetchOne(v);
-    console.log(ok ? "✓" : "✗");
+    console.log(ok ? "  ✓" : "  ✗");
     if (ok) successCount++;
 
     const entry = lib.videos.find(e => e.id === v.id);
@@ -425,7 +420,7 @@ async function cmdFetchAll() {
   }
 
   const failed = total - successCount;
-  console.log(`\n${" ".repeat(pad + 2)}${bar(total, total)}  Готово: ${successCount}/${total}${failed ? "  (провалів: " + failed + ")" : ""}`);
+  console.log(`\n${"█".repeat(24)}  Готово: ${successCount}/${total}${failed ? "  (провалів: " + failed + ")" : ""}`);
 }
 
 function cmdDownload(id, quality) {
