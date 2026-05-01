@@ -207,10 +207,10 @@ function cmdPick() {
     "--border=rounded",
     "--preview=" + preview,
     "--preview-window=right:35%",
-    "--header=Enter=відкрити  Ctrl+D=видалити все  Ctrl+X=видалити відео  Ctrl+R=видалити переклад",
+    "--header=Enter=відкрити  Ctrl+D=видалити все  Ctrl+X=відео(скач/видал)  Ctrl+R=переклад(скач/видал)",
     "--bind=ctrl-d:execute-silent(vot _remove-silent {2})+reload(vot _list-pick)",
-    "--bind=ctrl-x:execute-silent(vot _remove-video-silent {2})+reload(vot _list-pick)",
-    "--bind=ctrl-r:execute-silent(vot _remove-translation-silent {2})+reload(vot _list-pick)",
+    "--bind=ctrl-x:execute(vot _toggle-video {2})+reload(vot _list-pick)",
+    "--bind=ctrl-r:execute(vot _toggle-translation {2})+reload(vot _list-pick)",
   ], { input: lines, encoding: "utf8", stdio: ["pipe", "pipe", "inherit"] });
 
   if (result.status !== 0 || !result.stdout.trim()) process.exit(0);
@@ -455,6 +455,53 @@ function cmdDownload(id, quality) {
   }
 }
 
+async function cmdToggleVideo(id) {
+  const lib = loadLib();
+  const video = lib.videos.find(v => v.id === id);
+  if (!video) return;
+
+  if (video.videoPath && fs.existsSync(video.videoPath)) {
+    deleteFile(video.videoPath);
+    video.videoPath = null;
+    saveLib(lib);
+    console.log("✓ Відео видалено, залишається в бібліотеці");
+  } else {
+    const q = readConf().quality || "1080";
+    fs.mkdirSync(VIDEOS_DIR, { recursive: true });
+    const template = path.join(VIDEOS_DIR, "%(title)s [%(id)s].%(ext)s");
+    console.log(`Завантажуємо: ${video.title} (${q}p)`);
+    const result = spawnSync("yt-dlp", ["-f", ytdlFormat(q), "-o", template, video.url], { stdio: "inherit" });
+    if (result.status === 0) {
+      const files = fs.readdirSync(VIDEOS_DIR).filter(f => f.includes("[" + video.id + "]"));
+      if (files.length) {
+        video.videoPath = path.join(VIDEOS_DIR, files[0]);
+        saveLib(lib);
+        console.log("✓ Збережено: " + video.videoPath);
+      }
+    }
+  }
+}
+
+async function cmdToggleTranslation(id) {
+  const lib = loadLib();
+  const video = lib.videos.find(v => v.id === id);
+  if (!video) return;
+
+  const f = path.join(CACHE_DIR, id + ".mp3");
+  if (fs.existsSync(f)) {
+    deleteFile(f);
+    video.translationFailed = false;
+    saveLib(lib);
+    console.log("✓ Переклад видалено");
+  } else {
+    console.log(`Перекладаємо: ${video.title}`);
+    const ok = await fetchOne(video);
+    video.translationFailed = !ok;
+    saveLib(lib);
+    console.log(ok ? "✓ Готово" : "✗ Провал");
+  }
+}
+
 async function cmdSyncThumbs() {
   const lib = loadLib();
   const missing = lib.videos.filter(v => !fs.existsSync(thumbPath(v.id)));
@@ -577,6 +624,8 @@ const [,, cmd, arg, qualityArg] = process.argv;
     case "_remove-video-silent":   if (arg) cmdRemoveVideoSilent(arg); break;
     case "remove-translation":     if (!arg) die("Вкажіть ID"); cmdRemoveTranslation(arg); break;
     case "_remove-translation-silent": if (arg) cmdRemoveTranslationSilent(arg); break;
+    case "_toggle-video":              if (arg) await cmdToggleVideo(arg); break;
+    case "_toggle-translation":        if (arg) await cmdToggleTranslation(arg); break;
     case "clean":                  cmdClean(); break;
     case "fetch":
       if (!arg) die("Вкажіть ID або --all");

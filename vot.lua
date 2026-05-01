@@ -37,6 +37,7 @@ end
 local vot_file = nil
 local translating = false
 local status_timer = nil
+local auto_paused = false
 
 local function cleanup()
     if vot_file then
@@ -49,6 +50,7 @@ local function cleanup()
         status_timer = nil
     end
     translating = false
+    auto_paused = false
 end
 
 local function find_vot_track()
@@ -93,6 +95,13 @@ local function on_done(success, result, err)
     if status_timer then status_timer:kill(); status_timer = nil end
     translating = false
 
+    local function resume_if_paused()
+        if auto_paused then
+            mp.set_property_bool("pause", false)
+            auto_paused = false
+        end
+    end
+
     if not success or result.status ~= 0 then
         local stderr = result and result.stderr or err or "?"
         local last_status = ""
@@ -108,6 +117,7 @@ local function on_done(success, result, err)
             os.remove(vot_file .. ".status")
             vot_file = nil
         end
+        resume_if_paused()
         return
     end
 
@@ -115,14 +125,16 @@ local function on_done(success, result, err)
     if output and output ~= "" then
         local source = output:match("^/") and "кеш" or "сервер"
         mp.commandv("audio-add", output, "select", "VOT " .. opts.language)
+        resume_if_paused()
         mp.osd_message("VOT: переклад додано [" .. source .. "]  ←  Ctrl+T щоб вимкнути", 5)
     else
+        resume_if_paused()
         mp.osd_message("VOT: не отримано адресу аудіо", 5)
     end
     if vot_file then os.remove(vot_file .. ".status") end
 end
 
-local function start_translation()
+local function start_translation(auto_mode)
     local file_path = mp.get_property("path") or ""
     local url = get_youtube_url(file_path)
 
@@ -132,7 +144,13 @@ local function start_translation()
     end
 
     if translating then
-        mp.osd_message("VOT: переклад вже виконується...", 3)
+        if auto_paused then
+            mp.set_property_bool("pause", false)
+            auto_paused = false
+            mp.osd_message("VOT: відео відновлено (переклад іде в фоні)", 4)
+        else
+            mp.osd_message("VOT: переклад вже виконується...", 3)
+        end
         return
     end
 
@@ -140,9 +158,24 @@ local function start_translation()
     if old then mp.commandv("audio-remove", old) end
     cleanup()
 
+    -- Pause video if auto-translate and no cached translation
+    if auto_mode then
+        local vid_id = url:match("[?&]v=([A-Za-z0-9_%-]+)")
+        local cache_mp3 = vid_id and (home .. "/.cache/vot/" .. vid_id .. ".mp3") or nil
+        if cache_mp3 then
+            local f = io.open(cache_mp3, "r")
+            if not f then
+                mp.set_property_bool("pause", true)
+                auto_paused = true
+            else
+                f:close()
+            end
+        end
+    end
+
     vot_file = "/tmp/vot_" .. os.time() .. ".mp3"
     translating = true
-    mp.osd_message("VOT: запускаємо переклад...", 3)
+    mp.osd_message(auto_paused and "VOT: пауза — отримуємо переклад..." or "VOT: запускаємо переклад...", 3)
     msg.info("Running: " .. opts.vot_bin .. " " .. opts.vot_script .. " " .. url)
 
     status_timer = mp.add_periodic_timer(2, read_status)
@@ -164,7 +197,7 @@ local function toggle()
     elseif translating then
         mp.osd_message("VOT: переклад вже виконується...", 3)
     else
-        start_translation()
+        start_translation(false)
     end
 end
 
@@ -178,7 +211,7 @@ mp.register_event("file-loaded", function()
             if in_skip_list(lang) then
                 msg.info("VOT: пропускаємо (" .. lang .. " в skipLangs)")
             else
-                start_translation()
+                start_translation(true)
             end
         end
     end

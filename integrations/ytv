@@ -61,7 +61,7 @@ trap "rm -f $RESULTS $SEARCH_SCRIPT $BG_SCRIPT $LIMIT_SCRIPT" EXIT
   printf 'LIM=$(grep "^search_limit=" "%s" 2>/dev/null | cut -d= -f2 | tr -d '"'"' '"'"')\n' "$CONF"
   printf 'LIM=${LIM:-20}\n'
   printf 'yt-dlp --lazy-playlist "ytsearch${LIM}:%s" \\\n' "$QUERY"
-  printf '  --print "%(id)s${TAB}%(title)s${TAB}%(uploader)s${TAB}%(duration_string)s" \\\n'
+  printf '  --print "%%(id)s${TAB}%%(title)s${TAB}%%(uploader)s${TAB}%%(duration_string)s" \\\n'
   printf '  --no-playlist --quiet 2>/dev/null | tee "%s" | "%s"\n' "$RESULTS" "$FMT"
 } > "$SEARCH_SCRIPT"
 chmod +x "$SEARCH_SCRIPT"
@@ -77,7 +77,7 @@ SEARCH_CACHE="${CACHE_DIR_YTV}/ytv-${QUERY_HASH}.tsv"
   printf 'LIM=$(grep "^search_limit=" "%s" 2>/dev/null | cut -d= -f2 | tr -d '"'"' '"'"')\n' "$CONF"
   printf 'LIM=${LIM:-20}\n'
   printf 'yt-dlp --lazy-playlist "ytsearch${LIM}:%s" \\\n' "$QUERY"
-  printf '  --print "%(id)s${TAB}%(title)s${TAB}%(uploader)s${TAB}%(duration_string)s" \\\n'
+  printf '  --print "%%(id)s${TAB}%%(title)s${TAB}%%(uploader)s${TAB}%%(duration_string)s" \\\n'
   printf '  --no-playlist --quiet 2>/dev/null > "%s.new" \\\n' "$RESULTS"
   printf '  && mv "%s.new" "%s" && cp "%s" "%s"\n' "$RESULTS" "$RESULTS" "$RESULTS" "$SEARCH_CACHE"
 } > "$BG_SCRIPT"
