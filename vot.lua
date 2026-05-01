@@ -112,8 +112,9 @@ local function on_done(success, result, err)
 
     local output = (result.stdout or ""):match("^([^\n]+)")
     if output and output ~= "" then
+        local source = output:match("^/") and "кеш" or "сервер"
         mp.commandv("audio-add", output, "select", "VOT " .. opts.language)
-        mp.osd_message("VOT: переклад додано  ←  Ctrl+T щоб вимкнути", 5)
+        mp.osd_message("VOT: переклад додано [" .. source .. "]  ←  Ctrl+T щоб вимкнути", 5)
     else
         mp.osd_message("VOT: не отримано адресу аудіо", 5)
     end

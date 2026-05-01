@@ -411,6 +411,67 @@ function cmdDownload(id, quality) {
   }
 }
 
+async function cmdSyncThumbs() {
+  const lib = loadLib();
+  const missing = lib.videos.filter(v => !fs.existsSync(thumbPath(v.id)));
+  if (!missing.length) { console.log("Всі thumbnails є."); return; }
+  console.log(`Завантажуємо thumbnails для ${missing.length} відео...\n`);
+  for (const v of missing) {
+    process.stdout.write(`  ${v.title.slice(0, 55).padEnd(56)}… `);
+    const ok = await downloadThumb(v.id);
+    console.log(ok ? "✓" : "—");
+  }
+}
+
+async function cmdAddPlaylist(url) {
+  if (!url) { die("Вкажіть URL плейлісту"); }
+  console.log("Отримуємо список відео з плейлісту...");
+
+  let entries;
+  try {
+    const out = execFileSync("yt-dlp", [
+      "--flat-playlist", "--print", "%(id)s\t%(title)s", "--no-warnings", url,
+    ], { timeout: 60000, encoding: "utf8" });
+    entries = out.trim().split("\n").filter(Boolean).map(line => {
+      const i = line.indexOf("\t");
+      return { id: line.slice(0, i), title: line.slice(i + 1) };
+    });
+  } catch (e) { die("Помилка отримання плейлісту: " + e.message); }
+
+  console.log(`Знайдено ${entries.length} відео.\n`);
+  const lib = loadLib();
+  let added = 0, skipped = 0;
+
+  for (const { id, title } of entries) {
+    if (lib.videos.find(v => v.id === id)) { skipped++; continue; }
+    lib.videos.push({
+      id, title, added: new Date().toISOString(),
+      url: `https://www.youtube.com/watch?v=${id}`,
+      translationFailed: false, videoPath: null,
+    });
+    console.log(`  ✓ ${title}`);
+    added++;
+  }
+  saveLib(lib);
+  console.log(`\nДодано: ${added}${skipped ? ", вже було: " + skipped : ""}`);
+
+  if (added > 0) {
+    console.log("\nЗавантажуємо thumbnails...");
+    for (const { id } of entries.filter(e => !fs.existsSync(thumbPath(e.id)))) {
+      await downloadThumb(id);
+    }
+    console.log("✓");
+  }
+}
+
+function cmdUpdate() {
+  console.log("Оновлення vot-mpv...");
+  const pull = spawnSync("git", ["-C", SHARE_DIR, "pull"], { stdio: "inherit" });
+  if (pull.status !== 0) { console.error("✗ git pull не вдався"); process.exit(1); }
+  console.log("\nПеревстановлення...");
+  spawnSync("bash", [path.join(SHARE_DIR, "install.sh")], { stdio: "inherit" });
+}
+
 // ── Entry point ───────────────────────────────────────────────────────────────
 
 function die(msg) { console.error(msg); process.exit(1); }
@@ -419,18 +480,21 @@ function help() {
   console.log(`
 vot — менеджер відео з перекладом
 
-  add <url>                Додати YouTube відео (+ завантажує thumbnail)
+  add <url> [url2...]      Додати YouTube відео (можна кілька одразу)
+  add-playlist <url>       Додати всі відео з плейлісту
   list                     Показати всі відео зі статусами
   pick                     fzf: Enter=відкрити  Ctrl+D=видалити все
                                Ctrl+X=видалити відео  Ctrl+R=видалити переклад
   play <id> [quality]      Відкрити в mpv (quality: 480/720/1080/2160/best)
+  fetch <id>               Завантажити переклад для одного відео
+  fetch --all              Завантажити переклади для всіх без перекладу
+  download <id> [q]        Скачати відео (меню якості або вкажи q)
   remove <id>              Видалити з бібліотеки + відео + переклад + thumbnail
   remove-video <id>        Видалити тільки відео файл (залишити в бібліотеці)
   remove-translation <id>  Видалити тільки переклад
   clean                    Видалити переклади і thumbnails не з бібліотеки
-  fetch <id>               Завантажити переклад для одного відео
-  fetch --all              Завантажити переклади для всіх без перекладу
-  download <id> [q]        Скачати відео (меню якості або вкажи q)
+  sync-thumbs              Завантажити thumbnails для всіх відео без них
+  update                   Оновити vot-mpv через git pull + переінсталяція
 
 Іконки: 🌐 онлайн  💾 локальне  ✓ переклад є  ✗ провал  — немає
 Якщо відео скачано — переклад зберігається назавжди (без 7-денного ліміту).
@@ -441,7 +505,13 @@ const [,, cmd, arg, qualityArg] = process.argv;
 
 (async () => {
   switch (cmd) {
-    case "add":                    if (!arg) die("Вкажіть URL"); await cmdAdd(arg); break;
+    case "add": {
+      const urls = process.argv.slice(3);
+      if (!urls.length) die("Вкажіть URL(и)");
+      for (const u of urls) await cmdAdd(u);
+      break;
+    }
+    case "add-playlist":           if (!arg) die("Вкажіть URL плейлісту"); await cmdAddPlaylist(arg); break;
     case "list":                   cmdList(); break;
     case "pick":                   cmdPick(); break;
     case "_list-pick":             cmdListPick(); break;
@@ -459,6 +529,8 @@ const [,, cmd, arg, qualityArg] = process.argv;
       else await cmdFetch(arg);
       break;
     case "download":               if (!arg) die("Вкажіть ID"); cmdDownload(arg, qualityArg); break;
+    case "sync-thumbs":            await cmdSyncThumbs(); break;
+    case "update":                 cmdUpdate(); break;
     default:                       help(); break;
   }
 })();
