@@ -1,7 +1,7 @@
 # vot-mpv — голосовий переклад YouTube в mpv
 
-Система для перекладу англомовних YouTube відео на російську мову прямо в mpv плеєрі.
-Використовує Яндекс Браузер Translation API через Cloudflare воркер як проміжний сервер.
+Переклад англомовних YouTube відео на російську мову прямо в mpv.
+Використовує Яндекс Translation API через Cloudflare воркер `vot-worker.eu.cc`.
 
 ---
 
@@ -9,17 +9,15 @@
 
 **Залежності:**
 ```bash
-sudo pacman -S nodejs yt-dlp mpv   # Arch Linux
+sudo pacman -S nodejs yt-dlp mpv fzf
 ```
 
 **Встановлення:**
 ```bash
-git clone https://github.com/multi-man/vot-mpv ~/.local/share/vot-mpv
+git clone https://github.com/MultiUpGame/vot-mpv ~/.local/share/vot-mpv
 cd ~/.local/share/vot-mpv
 bash install.sh
 ```
-
-Готово. Відкрий YouTube в mpv і натисни **Ctrl+T**.
 
 ---
 
@@ -27,163 +25,92 @@ bash install.sh
 
 ```
 ~/.local/share/vot-mpv/
-├── vot-translate.js        # Node.js скрипт — серце системи
+├── vot-translate.js        # Node.js скрипт перекладу (серце системи)
+├── vot-cli.js              # CLI менеджер бібліотеки
+├── vot.lua                 # Lua скрипт для mpv
+├── integrations/
+│   ├── ytv                 # YouTube пошук + інтеграція з бібліотекою
+│   └── ytv-fmt             # Допоміжний форматер для ytv
 ├── node_modules/           # npm пакети (@vot.js/node)
-└── README.md               # цей файл
+└── library.json            # Бібліотека відео (створюється автоматично)
 
 ~/.config/mpv/scripts/
-└── vot.lua                 # Lua скрипт для mpv
+└── vot.lua                 # (копія, завантажується mpv)
 
 ~/.config/mpv/script-opts/
 └── vot.conf                # налаштування
 
-~/.config/mpv/
-└── input.conf              # прив'язки клавіш
-
 ~/.cache/vot/
-└── <videoId>.mp3           # локальний кеш перекладів (7 днів)
+└── <videoId>.mp3           # кеш перекладів (7 днів)
+
+~/Videos/vot/
+└── Назва відео [videoId].webm  # скачані відео
 ```
 
 ---
 
-## Як користуватись
+## Використання
 
-Відкрий YouTube відео в mpv:
+### Переклад в mpv (як і раніше)
+
 ```bash
 mpv 'https://www.youtube.com/watch?v=...'
 ```
+Натисни **Ctrl+T** — вмикає/вимикає переклад.
+Якщо переклад вже є в кеші — починається миттєво.
 
-Натисни **Ctrl+T** — на екрані з'явиться статус перекладу. Коли готово — автоматично увімкнеться другий аудіотрек з перекладом.
-
-Повторний **Ctrl+T** — вимикає переклад.
-
-Якщо відео вже перекладалось раніше (є в кеші) — переклад починається **миттєво**.
+Працює і для **локальних файлів** скачаних через `vot download` —
+скрипт витягує videoId з назви файлу і бере переклад з кешу.
 
 ---
 
-## Як це працює зсередини
+### vot — менеджер бібліотеки
 
-### 1. Клавіша → Lua → Node.js
-
-Коли натискаєш Ctrl+T, `vot.lua` запускає `vot-translate.js` як підпроцес:
-```
-node vot-translate.js <YouTube-URL> /tmp/vot_1234.mp3
-```
-
-Аргумент `/tmp/vot_1234.mp3` — це базовий шлях для `.status` файлу прогресу (сам файл MP3 більше не створюється тут, тільки `.status`).
-
-Кожні 2 секунди Lua читає `/tmp/vot_1234.mp3.status` і виводить вміст на OSD (текст на екрані mpv).
-
-### 2. Перевірка локального кешу
-
-Перш за все скрипт дивиться чи є вже збережений переклад:
-```
-~/.cache/vot/<videoId>.mp3
-```
-де `<videoId>` — ID відео з YouTube URL (наприклад `QTzpTAtds2c`).
-
-Якщо файл існує і свіжіший 7 днів — одразу передає шлях до нього в mpv. Без жодних запитів до Яндекса.
-
-### 3. Чому не можна звертатись до Яндекса напряму
-
-Яндекс заблокований в Україні на двох рівнях:
-
-**DNS-блокування** — провайдер повертає неправильну IP-адресу для `api.browser.yandex.ru`.
-Вирішення: змінено DNS на `1.1.1.1` (Cloudflare):
 ```bash
-nmcli connection modify "Batari" ipv4.dns "1.1.1.1 8.8.8.8" ipv4.ignore-auto-dns yes
+vot add <url>       # Додати відео до бібліотеки (автоматично бере назву)
+vot list            # Показати всі відео зі статусами
+vot pick            # Вибрати через fzf → відкрити в mpv
+vot play <id>       # Відкрити відео в mpv за ID
+vot remove <id>     # Видалити з бібліотеки
+vot fetch <id>      # Завантажити переклад для одного відео
+vot fetch --all     # Завантажити переклади для всіх (по черзі, макс 5хв/відео)
+vot download <id>   # Скачати відео локально через yt-dlp
 ```
 
-**IP-блокування** — навіть з правильним DNS, IP-адреса Яндекса (`213.180.193.x`) заблокована на рівні firewall провайдера.
-Вирішення: всі запити йдуть через `vot-worker.eu.cc` — це Cloudflare Workers сервер, який проксіює запити до Яндекса. Його IP не заблокований.
+**Іконки в `vot list`:**
+```
+  Src  Пер  ID            Назва
+  ────────────────────────────────────────────────
+  🌐   ✓   dQw4w9WgXcQ  Rick Astley - Never Gonna Give You Up
+  💾   ✓   HH50ccnDbaU  Become a Hyprland God With Hyprctl
+  🌐   ✗   abc12345678  Відео яке не вдалось перекласти
+  🌐   —   xyz98765432  Відео без перекладу
 
-### 4. Отримання метаданих відео
-
-```javascript
-const data = await videoData.getVideoData(url);
+  🌐 онлайн  💾 локальний файл
+  ✓ переклад є  ✗ провал  — немає
 ```
 
-Бібліотека `@vot.js/node` витягує з YouTube: ID відео, мову, тривалість.
+---
 
-**Проблема з тривалістю**: `getVideoData` іноді не повертає тривалість для YouTube. Яндекс використовує тривалість щоб розрахувати час обробки — без неї може некоректно обробляти запит.
+### ytv — пошук YouTube з інтеграцією бібліотеки
 
-Якщо тривалість відсутня — запускається `yt-dlp`:
 ```bash
-yt-dlp --print duration <url>
+ytv hyprland tutorial
 ```
 
-### 5. Запит до Яндекса
-
-```javascript
-const client = new VOTWorkerClient({ host: "vot-worker.eu.cc", fetchFn });
-result = await client.translateVideo({ videoData: data, responseLang: "ru" });
+Відкриває fzf зі списком результатів:
 ```
-
-Яндекс може відповісти трьома способами:
-
-| Відповідь | Значення | Що робимо |
-|---|---|---|
-| `translated: true` + `url` | Переклад готовий | Беремо URL аудіо |
-| `translated: false` + `remainingTime: N` | Яндекс ще обробляє | Чекаємо N секунд, повторюємо |
-| виняток `shouldRetry: 1` | Яндекс просить зачекати | Чекаємо 30с, повторюємо |
-
-Максимум 60 спроб (~30 хвилин). Якщо відео взагалі недоступне Яндексу — буде `shouldRetry` на всі 60 спроб.
-
-**Чому деякі відео не перекладаються**: YouTube заблокований в Росії з серпня 2024 року. Яндекс не може завантажити нові відео для перекладу. Працюють тільки ті відео, які вже є в кеші Яндекса (були перекладені раніше іншими користувачами через браузерне розширення).
-
-### 6. Проблема IPv6 в Node.js
-
-Node.js за замовчуванням спочатку пробує IPv6-підключення, яке таймаутить через ~3 секунди перед тим як спробувати IPv4. Це викликало помилку `This operation was aborted` при кожному запиті.
-
-Вирішення — перший рядок скрипту:
-```javascript
-require("dns").setDefaultResultOrder("ipv4first");
+★  18:27  saneAspect            Hyprland - Best Tiling WM in 2025
+   45:12  typecraft              Hyprland Complete Config Guide
+★  32:05  Dreams of Code         Hyprland Dotfiles from Scratch
 ```
+`★` — вже є в бібліотеці.
 
-Плюс власна `fetchFn` з таймаутом 15 секунд замість стандартного 3-секундного.
-
-### 7. Отримання аудіо
-
-Яндекс зберігає готове аудіо на S3:
-```
-https://vtrans.s3-private.mds.yandex.net/tts/prod/...
-```
-
-Цей домен теж заблокований в Україні. Тому URL замінюється на проксі:
-```
-https://vot-worker.eu.cc/video-translation/audio-proxy/...
-```
-
-### 8. Стрімінг замість завантаження
-
-Раніше скрипт завантажував весь MP3 файл (~5-20 МБ для довгих відео) перш ніж mpv міг його відтворити. Тепер:
-
-```javascript
-// Виводимо URL одразу — mpv починає стрімити
-process.stdout.write(proxiedUrl + "\n");
-
-// Фоновий процес зберігає файл в кеш (відокремлений, не блокує)
-const child = spawn(process.execPath, [__filename, "--download-cache", proxiedUrl, cacheFile], {
-    detached: true,
-    stdio: "ignore",
-});
-child.unref();
-
-process.exit(0); // виходимо одразу, не чекаємо завантаження
-```
-
-mpv отримує URL → одразу починає грати через стрімінг. Паралельно фоновий процес (вже відокремлений від основного) тихо зберігає файл у `~/.cache/vot/`.
-
-### 9. Lua читає stdout
-
-```lua
-local output = (result.stdout or ""):match("^([^\n]+)")
-if output and output ~= "" then
-    mp.commandv("audio-add", output, "select", "VOT ru")
-end
-```
-
-`output` — це або URL (для стрімінгу), або шлях до кешованого файлу. mpv обробляє обидва варіанти однаково через `audio-add`.
+| Клавіша | Дія |
+|---------|-----|
+| `Enter` | Відкрити відео в mpv |
+| `Ctrl+A` | Додати в бібліотеку (залишається в fzf, ★ з'являється) |
+| `Esc` | Вийти |
 
 ---
 
@@ -191,36 +118,51 @@ end
 
 ```ini
 language=ru          # мова перекладу
-autoTranslate=no     # автоматично перекладати при відкритті відео
+autoTranslate=no     # автоматично перекладати при відкритті
 vot_bin=/usr/bin/node
 vot_script=/home/multi-man/.local/share/vot-mpv/vot-translate.js
 ```
 
-Щоб переклад вмикався автоматично для всіх онлайн-відео:
-```ini
-autoTranslate=yes
-```
+---
+
+## Як це працює
+
+### Переклад
+
+1. **Ctrl+T** → `vot.lua` запускає `vot-translate.js <url> /tmp/vot_xxx.mp3`
+2. Скрипт перевіряє `~/.cache/vot/<videoId>.mp3` — якщо є і свіжіше 7 днів, повертає одразу
+3. Інакше — запит до `vot-worker.eu.cc` (Cloudflare проксі до Яндекса)
+4. Яндекс повертає URL аудіо на S3 → замінюється на audio-proxy воркера
+5. URL передається в mpv одразу (стрімінг), паралельно фоновий процес зберігає MP3 в кеш
+
+### Чому через воркер, а не напряму
+
+Яндекс заблокований в Україні на рівні DNS і IP.
+`vot-worker.eu.cc` — Cloudflare Workers проксі, його IP не заблокований.
+
+### Локальні файли
+
+`vot.lua` витягує videoId з назви файлу формату `Назва [videoId].webm`
+і конструює YouTube URL для пошуку перекладу в кеші.
+
+### Чому деякі відео не перекладаються
+
+YouTube заблокований в Росії з серпня 2024. Яндекс не може завантажити нові відео.
+Працюють тільки відео що вже є в кеші Яндекса (перекладались раніше через браузерне розширення).
+
+### IPv6 проблема в Node.js
+
+Node.js за замовчуванням пробує IPv6 першим — таймаут ~3с перед IPv4.
+Вирішення: `require("dns").setDefaultResultOrder("ipv4first")` + власна `fetchFn` з таймаутом 15с.
 
 ---
 
 ## Залежності
 
-- `node` (`/usr/bin/node`) — Node.js 18+
-- `yt-dlp` (`/usr/bin/yt-dlp`) — для визначення тривалості відео
-- `@vot.js/node` — встановлено в `node_modules/`:
-  ```bash
-  cd ~/.local/share/vot-mpv
-  npm install @vot.js/node
-  ```
-
----
-
-## Кеш
-
-Переклади зберігаються в `~/.cache/vot/` під назвою `<videoId>.mp3`.
-Термін дії — 7 днів. Після закінчення — автоматично перекладається знову.
-
-Очистити кеш вручну:
-```bash
-rm -rf ~/.cache/vot/
-```
+| Пакет | Для чого |
+|-------|---------|
+| `nodejs` | запуск vot-translate.js |
+| `yt-dlp` | тривалість відео + пошук (ytv) + скачування |
+| `mpv` | відтворення |
+| `fzf` | інтерактивний вибір в `vot pick` і `ytv` |
+| `@vot.js/node` | VOT API клієнт (npm, в node_modules/) |

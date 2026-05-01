@@ -1,0 +1,22 @@
+#!/bin/bash
+# Helper: formats yt-dlp search results with vot library markers.
+# Called by ytv and by fzf --reload after Ctrl+A.
+# Usage: ytv-fmt <results-file>
+
+RESULTS_FILE="$1"
+LIBRARY="$HOME/.local/share/vot-mpv/library.json"
+
+while IFS=$'\t' read -r id title uploader duration; do
+  [ -z "$id" ] && continue
+  if grep -q "\"$id\"" "$LIBRARY" 2>/dev/null; then
+    marker="★"
+  else
+    marker=" "
+  fi
+  printf "%s  %-8s  %-22s  %s\t%s\n" \
+    "$marker" \
+    "${duration:--:--}" \
+    "${uploader:0:22}" \
+    "$title" \
+    "$id"
+done < "$RESULTS_FILE"

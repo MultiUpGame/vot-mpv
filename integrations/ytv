@@ -1,0 +1,45 @@
+#!/bin/bash
+# ytv — YouTube search integrated with vot library
+# Enter = відкрити в mpv   Ctrl+A = додати в бібліотеку   ★ = вже є
+
+QUERY="$*"
+if [ -z "$QUERY" ]; then
+  echo "Використання: ytv <пошук>"
+  echo "Приклад:      ytv hyprland tutorial"
+  exit 1
+fi
+
+VOT_CLI="$HOME/.local/share/vot-mpv/vot-cli.js"
+FMT="$HOME/.local/share/vot-mpv/integrations/ytv-fmt"
+RESULTS=$(mktemp /tmp/ytv-results.XXXXXX)
+trap "rm -f $RESULTS" EXIT
+
+echo "Шукаємо: $QUERY"
+yt-dlp "ytsearch20:$QUERY" \
+  --print "%(id)s	%(title)s	%(uploader)s	%(duration_string)s" \
+  --no-playlist \
+  --quiet \
+  2>/dev/null > "$RESULTS"
+
+if [ ! -s "$RESULTS" ]; then
+  echo "Нічого не знайдено"
+  exit 1
+fi
+
+SELECTED=$("$FMT" "$RESULTS" | fzf \
+  --delimiter=$'\t' \
+  --with-nth=1 \
+  --prompt="ytv › " \
+  --header="Enter = відкрити в mpv   Ctrl+A = додати в бібліотеку   ★ = вже є в бібліотеці" \
+  --height=70% \
+  --border=rounded \
+  --bind "ctrl-a:execute-silent(
+    id=\$(echo {} | cut -f2);
+    node \"$VOT_CLI\" add \"https://www.youtube.com/watch?v=\$id\"
+  )+reload(\"$FMT\" \"$RESULTS\")" \
+)
+
+[ -z "$SELECTED" ] && exit 0
+
+ID=$(echo "$SELECTED" | cut -f2)
+mpv "https://www.youtube.com/watch?v=$ID"
