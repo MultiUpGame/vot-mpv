@@ -197,8 +197,9 @@ function cmdRemove(id) {
 }
 
 function fetchOne(video) {
+  const lang = readConf().language || "ru";
   return new Promise((resolve) => {
-    const child = spawn(process.execPath, [VOT_SCRIPT, "--prefetch", video.url], {
+    const child = spawn(process.execPath, [VOT_SCRIPT, "--prefetch", video.url, lang], {
       stdio: ["ignore", "pipe", "pipe"],
     });
 

@@ -119,12 +119,21 @@ ytv hyprland tutorial
 `~/.config/mpv/script-opts/vot.conf`:
 
 ```ini
-language=ru          # мова перекладу
-autoTranslate=no     # автоматично перекладати при відкритті відео
+language=ru          # мова озвучки перекладу (ru / en / kk)
+autoTranslate=no     # автоматично перекладати при відкритті відео (yes/no)
 quality=1080         # якість для перегляду і скачування (480/720/1080/2160/best)
 vot_bin=/usr/bin/node
 vot_script=/home/multi-man/.local/share/vot-mpv/vot-translate.js
 ```
+
+**Підтримувані мови:**
+
+| Параметр | Значення |
+|----------|---------|
+| `language` (озвучка) | `ru`, `en`, `kk` — більше Яндекс не підтримує |
+| Вхідна мова відео | визначається автоматично: en, zh, ko, de, fr, es, it, ja, ar та інші |
+
+Українська озвучка недоступна — Яндекс її не має в TTS.
 
 `quality` використовується як дефолт для `vot play`, `vot pick`, `vot download` і `ytv`.
 `vot download` завжди показує меню вибору, але підсвічує дефолт з конфігу.

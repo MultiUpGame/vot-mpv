@@ -60,7 +60,7 @@ function isCacheValid(cacheFile) {
   }
 }
 
-async function getTranslationUrl(url, onStatus) {
+async function getTranslationUrl(url, lang, onStatus) {
   onStatus("Отримуємо дані відео...");
   const data = await videoData.getVideoData(url);
   if (!data) throw new Error("Не вдалось отримати дані відео");
@@ -83,7 +83,7 @@ async function getTranslationUrl(url, onStatus) {
 
     let result;
     try {
-      result = await client.translateVideo({ videoData: data, responseLang: "ru" });
+      result = await client.translateVideo({ videoData: data, responseLang: lang });
     } catch (e) {
       if (e.data?.shouldRetry === 1) {
         const wait = e.data?.remainingTime > 0 ? e.data.remainingTime : 30;
@@ -121,6 +121,7 @@ if (process.argv[2] === "--download-cache") {
 }
 
 async function prefetch(url) {
+  const lang = process.argv[4] || "ru";
   const videoId = getVideoId(url);
   const cacheFile = getCacheFile(videoId);
 
@@ -130,7 +131,7 @@ async function prefetch(url) {
   }
 
   try {
-    const audioUrl = await getTranslationUrl(url, (msg) => process.stderr.write("[VOT] " + msg + "\n"));
+    const audioUrl = await getTranslationUrl(url, lang, (msg) => process.stderr.write("[VOT] " + msg + "\n"));
 
     if (cacheFile) {
       fs.mkdirSync(CACHE_DIR, { recursive: true });
@@ -148,6 +149,7 @@ async function prefetch(url) {
 async function main() {
   const url = process.argv[2];
   const outFile = process.argv[3];
+  const lang = process.argv[4] || "ru";
   const statusFile = outFile + ".status";
 
   if (!url || !outFile) {
@@ -170,7 +172,7 @@ async function main() {
       process.exit(0);
     }
 
-    const audioUrl = await getTranslationUrl(url, status);
+    const audioUrl = await getTranslationUrl(url, lang, status);
 
     try { fs.unlinkSync(statusFile); } catch (_) {}
     process.stdout.write(audioUrl + "\n");

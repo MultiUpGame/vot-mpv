@@ -126,7 +126,7 @@ local function start_translation()
 
     mp.command_native_async({
         name = "subprocess",
-        args = { opts.vot_bin, opts.vot_script, url, vot_file },
+        args = { opts.vot_bin, opts.vot_script, url, vot_file, opts.language },
         capture_stdout = true,
         capture_stderr = true,
     }, on_done)
