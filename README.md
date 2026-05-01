@@ -67,14 +67,14 @@ mpv 'https://www.youtube.com/watch?v=...'
 ### vot — менеджер бібліотеки
 
 ```bash
-vot add <url>       # Додати відео до бібліотеки (автоматично бере назву)
-vot list            # Показати всі відео зі статусами
-vot pick            # Вибрати через fzf → відкрити в mpv
-vot play <id>       # Відкрити відео в mpv за ID
-vot remove <id>     # Видалити з бібліотеки
-vot fetch <id>      # Завантажити переклад для одного відео
-vot fetch --all     # Завантажити переклади для всіх (по черзі, макс 5хв/відео)
-vot download <id>   # Скачати відео локально через yt-dlp
+vot add <url>              # Додати відео до бібліотеки (автоматично бере назву)
+vot list                   # Показати всі відео зі статусами
+vot pick                   # Вибрати через fzf → відкрити в mpv
+vot play <id> [quality]    # Відкрити відео в mpv (quality: 480/720/1080/2160/best)
+vot remove <id>            # Видалити з бібліотеки
+vot fetch <id>             # Завантажити переклад для одного відео
+vot fetch --all            # Завантажити переклади для всіх (по черзі, макс 5хв/відео)
+vot download <id> [q]      # Скачати відео (меню вибору якості або вкажи q)
 ```
 
 **Іконки в `vot list`:**
@@ -116,12 +116,24 @@ ytv hyprland tutorial
 
 ## Налаштування (vot.conf)
 
+`~/.config/mpv/script-opts/vot.conf`:
+
 ```ini
 language=ru          # мова перекладу
-autoTranslate=no     # автоматично перекладати при відкритті
+autoTranslate=no     # автоматично перекладати при відкритті відео
+quality=1080         # якість для перегляду і скачування (480/720/1080/2160/best)
 vot_bin=/usr/bin/node
 vot_script=/home/multi-man/.local/share/vot-mpv/vot-translate.js
 ```
+
+`quality` використовується як дефолт для `vot play`, `vot pick`, `vot download` і `ytv`.
+`vot download` завжди показує меню вибору, але підсвічує дефолт з конфігу.
+
+**Якщо відео гальмує або десинхронізується** — додай у `~/.config/mpv/mpv.conf`:
+```ini
+hwdec=auto
+```
+Вмикає апаратне декодування (VA-API/VDPAU). Особливо важливо для 4K/AV1.
 
 ---
 

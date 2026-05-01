@@ -6,6 +6,7 @@ local home = os.getenv("HOME") or ""
 local opts = {
     language = "ru",
     autoTranslate = false,
+    quality = "1080",
     vot_bin = "/usr/bin/node",
     vot_script = home .. "/.local/share/vot-mpv/vot-translate.js",
 }
