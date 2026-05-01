@@ -47,13 +47,102 @@ function getVideoId(url) {
   return m ? m[1] : null;
 }
 
-// Background cache download mode
+function getCacheFile(videoId) {
+  return videoId ? path.join(CACHE_DIR, videoId + ".mp3") : null;
+}
+
+function isCacheValid(cacheFile) {
+  try {
+    const stat = fs.statSync(cacheFile);
+    return Date.now() - stat.mtimeMs < CACHE_MAX_AGE_MS;
+  } catch {
+    return false;
+  }
+}
+
+async function getTranslationUrl(url, onStatus) {
+  onStatus("Отримуємо дані відео...");
+  const data = await videoData.getVideoData(url);
+  if (!data) throw new Error("Не вдалось отримати дані відео");
+
+  if (!data.duration) {
+    try {
+      const dur = execFileSync("/usr/bin/yt-dlp", ["--print", "duration", url], { timeout: 15000 }).toString().trim();
+      const d = parseInt(dur, 10);
+      if (d > 0) {
+        data.duration = d;
+        onStatus("Тривалість: " + d + "с. Перекладаємо...");
+      }
+    } catch (_) {}
+  }
+
+  const client = new VOTWorkerClient({ host: WORKER_HOST, fetchFn });
+
+  for (let i = 0; i < MAX_RETRIES; i++) {
+    onStatus("Переклад: спроба " + (i + 1) + "/" + MAX_RETRIES + "...");
+
+    let result;
+    try {
+      result = await client.translateVideo({ videoData: data, responseLang: "ru" });
+    } catch (e) {
+      if (e.data?.shouldRetry === 1) {
+        const wait = e.data?.remainingTime > 0 ? e.data.remainingTime : 30;
+        onStatus("Сервер обробляє... ~" + wait + "с (спроба " + (i + 1) + "/" + MAX_RETRIES + ")");
+        await sleep(wait * 1000);
+        continue;
+      }
+      throw e;
+    }
+
+    if (result.translated && result.url) {
+      return proxyAudioUrl(result.url);
+    }
+
+    const wait = result.remainingTime > 0 ? result.remainingTime : 30;
+    onStatus("Яндекс перекладає... ще ~" + wait + "с (спроба " + (i + 1) + ")");
+    await sleep(wait * 1000);
+  }
+
+  throw new Error("Таймаут перекладу");
+}
+
+// Mode: --download-cache <url> <dest>
 if (process.argv[2] === "--download-cache") {
   downloadFile(process.argv[3], process.argv[4])
     .then(() => process.exit(0))
     .catch(() => process.exit(1));
+
+// Mode: --prefetch <url>  (batch translation, waits for cache download)
+} else if (process.argv[2] === "--prefetch") {
+  prefetch(process.argv[3]);
+
 } else {
   main();
+}
+
+async function prefetch(url) {
+  const videoId = getVideoId(url);
+  const cacheFile = getCacheFile(videoId);
+
+  if (cacheFile && isCacheValid(cacheFile)) {
+    process.stdout.write("cached\n");
+    process.exit(0);
+  }
+
+  try {
+    const audioUrl = await getTranslationUrl(url, (msg) => process.stderr.write("[VOT] " + msg + "\n"));
+
+    if (cacheFile) {
+      fs.mkdirSync(CACHE_DIR, { recursive: true });
+      await downloadFile(audioUrl, cacheFile);
+    }
+
+    process.stdout.write("ok\n");
+    process.exit(0);
+  } catch (e) {
+    process.stderr.write("Error: " + e.message + "\n");
+    process.exit(1);
+  }
 }
 
 async function main() {
@@ -72,75 +161,24 @@ async function main() {
   }
 
   try {
-    // Check local cache first
     const videoId = getVideoId(url);
-    const cacheFile = videoId ? path.join(CACHE_DIR, videoId + ".mp3") : null;
+    const cacheFile = getCacheFile(videoId);
 
-    if (cacheFile) {
-      try {
-        const stat = fs.statSync(cacheFile);
-        if (Date.now() - stat.mtimeMs < CACHE_MAX_AGE_MS) {
-          try { fs.unlinkSync(statusFile); } catch (_) {}
-          process.stdout.write(cacheFile + "\n");
-          process.exit(0);
-        }
-      } catch (_) {}
+    if (cacheFile && isCacheValid(cacheFile)) {
+      try { fs.unlinkSync(statusFile); } catch (_) {}
+      process.stdout.write(cacheFile + "\n");
+      process.exit(0);
     }
 
-    status("Отримуємо дані відео...");
-    const data = await videoData.getVideoData(url);
-    if (!data) throw new Error("Не вдалось отримати дані відео");
+    const audioUrl = await getTranslationUrl(url, status);
 
-    if (!data.duration) {
-      try {
-        const dur = execFileSync("/usr/bin/yt-dlp", ["--print", "duration", url], { timeout: 15000 }).toString().trim();
-        const d = parseInt(dur, 10);
-        if (d > 0) { data.duration = d; status("Тривалість: " + d + "с. Перекладаємо..."); }
-      } catch (_) {}
-    }
-
-    const client = new VOTWorkerClient({ host: WORKER_HOST, fetchFn });
-    let audioUrl = null;
-
-    for (let i = 0; i < MAX_RETRIES; i++) {
-      status("Переклад: спроба " + (i + 1) + "/" + MAX_RETRIES + "...");
-
-      let result;
-      try {
-        result = await client.translateVideo({ videoData: data, responseLang: "ru" });
-      } catch (e) {
-        if (e.data?.shouldRetry === 1) {
-          const wait = e.data?.remainingTime > 0 ? e.data.remainingTime : 30;
-          status("Сервер обробляє... ~" + wait + "с (спроба " + (i + 1) + "/" + MAX_RETRIES + ")");
-          await sleep(wait * 1000);
-          continue;
-        }
-        throw e;
-      }
-
-      if (result.translated && result.url) {
-        audioUrl = result.url;
-        break;
-      }
-
-      const wait = result.remainingTime > 0 ? result.remainingTime : 30;
-      status("Яндекс перекладає... ще ~" + wait + "с (спроба " + (i + 1) + ")");
-      await sleep(wait * 1000);
-    }
-
-    if (!audioUrl) throw new Error("Таймаут перекладу");
-
-    const proxiedUrl = proxyAudioUrl(audioUrl);
-
-    // Output URL immediately — mpv streams it without waiting for download
     try { fs.unlinkSync(statusFile); } catch (_) {}
-    process.stdout.write(proxiedUrl + "\n");
+    process.stdout.write(audioUrl + "\n");
 
-    // Save to cache in background
     if (cacheFile) {
       try {
         fs.mkdirSync(CACHE_DIR, { recursive: true });
-        const child = spawn(process.execPath, [__filename, "--download-cache", proxiedUrl, cacheFile], {
+        const child = spawn(process.execPath, [__filename, "--download-cache", audioUrl, cacheFile], {
           detached: true,
           stdio: "ignore",
         });

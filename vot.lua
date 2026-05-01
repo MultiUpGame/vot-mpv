@@ -41,6 +41,19 @@ local function find_vot_track()
     return nil
 end
 
+-- Extracts YouTube videoId from URL or local filename like "Title [abc1234xyz].mkv"
+local function get_youtube_url(file_path)
+    local id = file_path:match("[?&]v=([A-Za-z0-9_%-]+)")
+    if id then return file_path end
+
+    id = file_path:match("%[([A-Za-z0-9_%-]+)%][^%[%]]*$")
+    if id and #id == 11 then
+        return "https://www.youtube.com/watch?v=" .. id
+    end
+
+    return nil
+end
+
 local function read_status()
     if not vot_file then return end
     local sf = vot_file .. ".status"
@@ -86,11 +99,14 @@ local function on_done(success, result, err)
 end
 
 local function start_translation()
-    local url = mp.get_property("path") or ""
-    if not url:match("^https?://") then
-        mp.osd_message("VOT: тільки для онлайн-відео", 4)
+    local file_path = mp.get_property("path") or ""
+    local url = get_youtube_url(file_path)
+
+    if not url then
+        mp.osd_message("VOT: потрібне YouTube відео або файл з [videoId] в назві", 4)
         return
     end
+
     if translating then
         mp.osd_message("VOT: переклад вже виконується...", 3)
         return
@@ -133,8 +149,7 @@ mp.add_key_binding(nil, "toggle", toggle)
 mp.register_event("file-loaded", function()
     cleanup()
     if opts.autoTranslate then
-        local path = mp.get_property("path") or ""
-        if path:match("^https?://") then
+        if get_youtube_url(mp.get_property("path") or "") then
             start_translation()
         end
     end
