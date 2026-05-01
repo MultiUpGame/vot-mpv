@@ -15,6 +15,16 @@ const AUDIO_PROXY = `https://${WORKER_HOST}/video-translation/audio-proxy/`;
 const MAX_RETRIES = 60;
 const CACHE_DIR = path.join(os.homedir(), ".cache", "vot");
 const CACHE_MAX_AGE_MS = 7 * 24 * 3600 * 1000;
+const LIBRARY_PATH = path.join(os.homedir(), ".local", "share", "vot-mpv", "library.json");
+
+function isVideoPermanent(videoId) {
+  if (!videoId) return false;
+  try {
+    const lib = JSON.parse(fs.readFileSync(LIBRARY_PATH, "utf8"));
+    const v = lib.videos && lib.videos.find(v => v.id === videoId);
+    return !!(v && v.videoPath);
+  } catch { return false; }
+}
 
 async function fetchFn(url, options = {}) {
   const { timeout = 15000, ...rest } = options;
@@ -51,8 +61,10 @@ function getCacheFile(videoId) {
   return videoId ? path.join(CACHE_DIR, videoId + ".mp3") : null;
 }
 
-function isCacheValid(cacheFile) {
+function isCacheValid(cacheFile, videoId) {
   try {
+    fs.statSync(cacheFile);
+    if (isVideoPermanent(videoId)) return true;
     const stat = fs.statSync(cacheFile);
     return Date.now() - stat.mtimeMs < CACHE_MAX_AGE_MS;
   } catch {
@@ -125,7 +137,7 @@ async function prefetch(url) {
   const videoId = getVideoId(url);
   const cacheFile = getCacheFile(videoId);
 
-  if (cacheFile && isCacheValid(cacheFile)) {
+  if (cacheFile && isCacheValid(cacheFile, videoId)) {
     process.stdout.write("cached\n");
     process.exit(0);
   }
@@ -166,7 +178,7 @@ async function main() {
     const videoId = getVideoId(url);
     const cacheFile = getCacheFile(videoId);
 
-    if (cacheFile && isCacheValid(cacheFile)) {
+    if (cacheFile && isCacheValid(cacheFile, videoId)) {
       try { fs.unlinkSync(statusFile); } catch (_) {}
       process.stdout.write(cacheFile + "\n");
       process.exit(0);

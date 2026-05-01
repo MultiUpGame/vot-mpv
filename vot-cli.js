@@ -8,6 +8,7 @@ const { execFileSync, spawnSync, spawn } = require("child_process");
 
 const SHARE_DIR  = path.join(os.homedir(), ".local", "share", "vot-mpv");
 const CACHE_DIR  = path.join(os.homedir(), ".cache", "vot");
+const THUMB_DIR  = path.join(os.homedir(), ".cache", "vot", "thumbs");
 const VIDEOS_DIR = path.join(os.homedir(), "Videos", "vot");
 const LIBRARY    = path.join(SHARE_DIR, "library.json");
 const VOT_SCRIPT = path.join(SHARE_DIR, "vot-translate.js");
@@ -54,7 +55,7 @@ function pickQuality(defaultQ) {
   return result.stdout.trim().split(" ")[0];
 }
 
-// ── Library ──────────────────────────────────────────────────────────────────
+// ── Library ───────────────────────────────────────────────────────────────────
 
 function loadLib() {
   try { return JSON.parse(fs.readFileSync(LIBRARY, "utf8")); }
@@ -73,9 +74,11 @@ function getVideoId(url) {
   return m ? m[1] : null;
 }
 
-function hasCachedTranslation(id) {
+function hasCachedTranslation(id, permanent = false) {
   try {
-    const stat = fs.statSync(path.join(CACHE_DIR, id + ".mp3"));
+    const f = path.join(CACHE_DIR, id + ".mp3");
+    const stat = fs.statSync(f);
+    if (permanent) return true;
     return Date.now() - stat.mtimeMs < CACHE_MAX_AGE_MS;
   } catch { return false; }
 }
@@ -88,20 +91,50 @@ function getTitle(url) {
   } catch { return url; }
 }
 
+function thumbPath(id) {
+  return path.join(THUMB_DIR, id + ".jpg");
+}
+
+async function downloadThumb(id) {
+  const dest = thumbPath(id);
+  if (fs.existsSync(dest)) return dest;
+  try {
+    fs.mkdirSync(THUMB_DIR, { recursive: true });
+    const res = await fetch(`https://img.youtube.com/vi/${id}/mqdefault.jpg`);
+    if (!res.ok) return null;
+    fs.writeFileSync(dest, Buffer.from(await res.arrayBuffer()));
+    return dest;
+  } catch { return null; }
+}
+
+function deleteFile(p) {
+  if (p) try { if (fs.existsSync(p)) fs.unlinkSync(p); } catch {}
+}
+
 // ── Icons ─────────────────────────────────────────────────────────────────────
 
 const I = { online: "🌐", local: "💾", ok: "✓", fail: "✗", none: "—" };
 
 function icons(v) {
+  const permanent = !!(v.videoPath);
   return {
-    src:   v.videoPath ? I.local : I.online,
-    trans: hasCachedTranslation(v.id) ? I.ok : v.translationFailed ? I.fail : I.none,
+    src:   permanent ? I.local : I.online,
+    trans: hasCachedTranslation(v.id, permanent) ? I.ok : v.translationFailed ? I.fail : I.none,
   };
+}
+
+// ── mpv helpers ───────────────────────────────────────────────────────────────
+
+function buildMpvArgs(target, quality) {
+  const args = [];
+  if (target.startsWith("http")) args.push(`--ytdl-format=${ytdlFormat(quality)}`);
+  args.push(target);
+  return args;
 }
 
 // ── Commands ──────────────────────────────────────────────────────────────────
 
-function cmdAdd(url) {
+async function cmdAdd(url) {
   const id = getVideoId(url);
   if (!id) { die("Не вдалось знайти videoId в URL: " + url); }
 
@@ -117,6 +150,10 @@ function cmdAdd(url) {
 
   lib.videos.push({ id, url, title, added: new Date().toISOString(), translationFailed: false, videoPath: null });
   saveLib(lib);
+
+  process.stdout.write("Завантажуємо thumbnail... ");
+  const thumb = await downloadThumb(id);
+  console.log(thumb ? "✓" : "—");
   console.log("✓ Додано");
 }
 
@@ -139,13 +176,12 @@ function cmdList() {
   console.log("  Легенда: 🌐 онлайн  💾 локальне  ✓ переклад є  ✗ провал  — немає\n");
 }
 
-function buildMpvArgs(target, quality) {
-  const args = [];
-  if (target.startsWith("http")) {
-    args.push(`--ytdl-format=${ytdlFormat(quality)}`);
+function cmdListPick() {
+  const lib = loadLib();
+  for (const v of lib.videos) {
+    const { src, trans } = icons(v);
+    process.stdout.write(`${src} ${trans}\t${v.id}\t${v.title}\n`);
   }
-  args.push(target);
-  return args;
 }
 
 function cmdPick() {
@@ -157,20 +193,32 @@ function cmdPick() {
     return `${src} ${trans}\t${v.id}\t${v.title}`;
   }).join("\n");
 
+  const preview =
+    'id={2}; thumb="' + THUMB_DIR + '/$id.jpg"; ' +
+    '[ -f "$thumb" ] || curl -s "https://img.youtube.com/vi/$id/mqdefault.jpg" -o "$thumb" 2>/dev/null; ' +
+    '[ -f "$thumb" ] && kitten icat --clear --stdin=no --transfer-mode=file ' +
+    '--place "${FZF_PREVIEW_COLUMNS}x${FZF_PREVIEW_LINES}@0x0" "$thumb" 2>/dev/null';
+
   const result = spawnSync("fzf", [
     "--delimiter=\t",
     "--with-nth=1,3",
     "--prompt=vot> ",
-    "--height=50%",
+    "--height=80%",
     "--border=rounded",
-    "--preview-window=hidden",
+    "--preview=" + preview,
+    "--preview-window=right:35%",
+    "--header=Enter=відкрити  Ctrl+D=видалити все  Ctrl+X=видалити відео  Ctrl+R=видалити переклад",
+    "--bind=ctrl-d:execute-silent(vot _remove-silent {2})+reload(vot _list-pick)",
+    "--bind=ctrl-x:execute-silent(vot _remove-video-silent {2})+reload(vot _list-pick)",
+    "--bind=ctrl-r:execute-silent(vot _remove-translation-silent {2})+reload(vot _list-pick)",
   ], { input: lines, encoding: "utf8", stdio: ["pipe", "pipe", "inherit"] });
 
   if (result.status !== 0 || !result.stdout.trim()) process.exit(0);
 
   const fields = result.stdout.trim().split("\t");
   const id = fields[1];
-  const video = lib.videos.find(v => v.id === id);
+  const lib2 = loadLib();
+  const video = lib2.videos.find(v => v.id === id);
   if (!video) { die("Не знайдено відео: " + id); }
 
   const target = video.videoPath && fs.existsSync(video.videoPath) ? video.videoPath : video.url;
@@ -191,9 +239,85 @@ function cmdRemove(id) {
   const lib = loadLib();
   const idx = lib.videos.findIndex(v => v.id === id);
   if (idx === -1) { die("Не знайдено: " + id); }
-  const [removed] = lib.videos.splice(idx, 1);
+  const [video] = lib.videos.splice(idx, 1);
   saveLib(lib);
-  console.log("✓ Видалено: " + removed.title);
+
+  const removed = ["бібліотека"];
+  if (video.videoPath)                                    { deleteFile(video.videoPath);                removed.push("відео"); }
+  if (fs.existsSync(path.join(CACHE_DIR, id + ".mp3"))) { deleteFile(path.join(CACHE_DIR, id + ".mp3")); removed.push("переклад"); }
+  if (fs.existsSync(thumbPath(id)))                      { deleteFile(thumbPath(id));                   removed.push("thumbnail"); }
+
+  console.log(`✓ Видалено (${removed.join(", ")}): ${video.title}`);
+}
+
+function cmdRemoveSilent(id) {
+  const lib = loadLib();
+  const idx = lib.videos.findIndex(v => v.id === id);
+  if (idx === -1) return;
+  const [video] = lib.videos.splice(idx, 1);
+  saveLib(lib);
+  deleteFile(video.videoPath);
+  deleteFile(path.join(CACHE_DIR, id + ".mp3"));
+  deleteFile(thumbPath(id));
+}
+
+function cmdRemoveVideo(id) {
+  const lib = loadLib();
+  const video = lib.videos.find(v => v.id === id);
+  if (!video) { die("Не знайдено: " + id); }
+  if (!video.videoPath) { console.log("Відео не скачано"); return; }
+  deleteFile(video.videoPath);
+  video.videoPath = null;
+  saveLib(lib);
+  console.log("✓ Відео видалено, залишається в бібліотеці: " + video.title);
+}
+
+function cmdRemoveVideoSilent(id) {
+  const lib = loadLib();
+  const video = lib.videos.find(v => v.id === id);
+  if (!video || !video.videoPath) return;
+  deleteFile(video.videoPath);
+  video.videoPath = null;
+  saveLib(lib);
+}
+
+function cmdRemoveTranslation(id) {
+  const lib = loadLib();
+  const video = lib.videos.find(v => v.id === id);
+  if (!video) { die("Не знайдено: " + id); }
+  const f = path.join(CACHE_DIR, id + ".mp3");
+  if (!fs.existsSync(f)) { console.log("Переклад не знайдено"); return; }
+  deleteFile(f);
+  video.translationFailed = false;
+  saveLib(lib);
+  console.log("✓ Переклад видалено: " + video.title);
+}
+
+function cmdRemoveTranslationSilent(id) {
+  const lib = loadLib();
+  const video = lib.videos.find(v => v.id === id);
+  if (!video) return;
+  deleteFile(path.join(CACHE_DIR, id + ".mp3"));
+  video.translationFailed = false;
+  saveLib(lib);
+}
+
+function cmdClean() {
+  const lib = loadLib();
+  const ids = new Set(lib.videos.map(v => v.id));
+  let count = 0;
+
+  for (const [dir, ext] of [[CACHE_DIR, ".mp3"], [THUMB_DIR, ".jpg"]]) {
+    try {
+      for (const f of fs.readdirSync(dir)) {
+        if (!f.endsWith(ext)) continue;
+        const id = f.slice(0, -ext.length);
+        if (!ids.has(id)) { fs.unlinkSync(path.join(dir, f)); count++; }
+      }
+    } catch {}
+  }
+
+  console.log(count ? `✓ Видалено ${count} файлів` : "Нічого для очищення");
 }
 
 function fetchOne(video) {
@@ -230,7 +354,7 @@ async function cmdFetch(id) {
 
 async function cmdFetchAll() {
   const lib = loadLib();
-  const toFetch = lib.videos.filter(v => !hasCachedTranslation(v.id));
+  const toFetch = lib.videos.filter(v => !hasCachedTranslation(v.id, !!(v.videoPath)));
 
   if (!toFetch.length) {
     console.log("Всі відео вже мають переклад.");
@@ -241,8 +365,7 @@ async function cmdFetchAll() {
 
   for (let i = 0; i < toFetch.length; i++) {
     const v = toFetch[i];
-    const prefix = `[${i + 1}/${toFetch.length}]`;
-    process.stdout.write(`${prefix} ${v.title}\n         → `);
+    process.stdout.write(`[${i + 1}/${toFetch.length}] ${v.title}\n         → `);
 
     const ok = await fetchOne(v);
     console.log(ok ? "✓" : "✗ провал, пропускаємо");
@@ -253,7 +376,7 @@ async function cmdFetchAll() {
   }
 
   const failed = lib.videos.filter(v => v.translationFailed).length;
-  console.log(`\nГотово. ${toFetch.length - failed} успішно${failed ? ", " + failed + " провалів (✗ в списку)" : ""}.`);
+  console.log(`\nГотово. ${toFetch.length - failed} успішно${failed ? ", " + failed + " провалів" : ""}.`);
 }
 
 function cmdDownload(id, quality) {
@@ -296,20 +419,21 @@ function help() {
   console.log(`
 vot — менеджер відео з перекладом
 
-  add <url>            Додати YouTube відео до бібліотеки
-  list                 Показати всі відео зі статусами
-  pick                 Вибрати через fzf → відкрити в mpv
-  play <id> [quality]  Відкрити відео в mpv (quality: 480/720/1080/2160/best)
-  remove <id>          Видалити з бібліотеки
-  fetch <id>           Завантажити переклад для одного відео
-  fetch --all          Завантажити переклади для всіх без перекладу
-  download <id> [q]    Скачати відео (якість вибирається через меню або вкажи q)
+  add <url>                Додати YouTube відео (+ завантажує thumbnail)
+  list                     Показати всі відео зі статусами
+  pick                     fzf: Enter=відкрити  Ctrl+D=видалити все
+                               Ctrl+X=видалити відео  Ctrl+R=видалити переклад
+  play <id> [quality]      Відкрити в mpv (quality: 480/720/1080/2160/best)
+  remove <id>              Видалити з бібліотеки + відео + переклад + thumbnail
+  remove-video <id>        Видалити тільки відео файл (залишити в бібліотеці)
+  remove-translation <id>  Видалити тільки переклад
+  clean                    Видалити переклади і thumbnails не з бібліотеки
+  fetch <id>               Завантажити переклад для одного відео
+  fetch --all              Завантажити переклади для всіх без перекладу
+  download <id> [q]        Скачати відео (меню якості або вкажи q)
 
-Якість за замовчуванням береться з vot.conf (quality=1080).
-
-Іконки в list:
-  🌐 онлайн  💾 локальний файл
-  ✓ переклад є  ✗ провал перекладу  — без перекладу
+Іконки: 🌐 онлайн  💾 локальне  ✓ переклад є  ✗ провал  — немає
+Якщо відео скачано — переклад зберігається назавжди (без 7-денного ліміту).
 `);
 }
 
@@ -317,17 +441,24 @@ const [,, cmd, arg, qualityArg] = process.argv;
 
 (async () => {
   switch (cmd) {
-    case "add":      if (!arg) die("Вкажіть URL"); cmdAdd(arg); break;
-    case "list":     cmdList(); break;
-    case "pick":     cmdPick(); break;
-    case "play":     if (!arg) die("Вкажіть ID"); cmdPlay(arg, qualityArg); break;
-    case "remove":   if (!arg) die("Вкажіть ID"); cmdRemove(arg); break;
+    case "add":                    if (!arg) die("Вкажіть URL"); await cmdAdd(arg); break;
+    case "list":                   cmdList(); break;
+    case "pick":                   cmdPick(); break;
+    case "_list-pick":             cmdListPick(); break;
+    case "play":                   if (!arg) die("Вкажіть ID"); cmdPlay(arg, qualityArg); break;
+    case "remove":                 if (!arg) die("Вкажіть ID"); cmdRemove(arg); break;
+    case "_remove-silent":         if (arg) cmdRemoveSilent(arg); break;
+    case "remove-video":           if (!arg) die("Вкажіть ID"); cmdRemoveVideo(arg); break;
+    case "_remove-video-silent":   if (arg) cmdRemoveVideoSilent(arg); break;
+    case "remove-translation":     if (!arg) die("Вкажіть ID"); cmdRemoveTranslation(arg); break;
+    case "_remove-translation-silent": if (arg) cmdRemoveTranslationSilent(arg); break;
+    case "clean":                  cmdClean(); break;
     case "fetch":
       if (!arg) die("Вкажіть ID або --all");
       if (arg === "--all") await cmdFetchAll();
       else await cmdFetch(arg);
       break;
-    case "download": if (!arg) die("Вкажіть ID"); cmdDownload(arg, qualityArg); break;
-    default:         help(); break;
+    case "download":               if (!arg) die("Вкажіть ID"); cmdDownload(arg, qualityArg); break;
+    default:                       help(); break;
   }
 })();
