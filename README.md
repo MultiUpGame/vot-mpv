@@ -69,6 +69,7 @@ OSD показує джерело: `[кеш]` або `[сервер]`.
 
 ```bash
 vot add <url> [url2...]      Додати відео (можна кілька одразу, назва + thumbnail автоматично)
+vot add --file <шлях>        Додати всі URL з текстового файлу (по одному на рядок, # ігнорується)
 vot add-playlist <url>       Додати всі відео з плейлісту
 vot list                     Показати всі відео зі статусами
 vot pick                     fzf з thumbnails → відкрити в mpv
@@ -81,6 +82,7 @@ vot remove-video <id>        Видалити тільки відео файл (
 vot remove-translation <id>  Видалити тільки переклад (щоб перескачати)
 vot clean                    Видалити переклади і thumbnails без запису в бібліотеці
 vot sync-thumbs              Завантажити thumbnails для всіх відео без них
+vot status                   Статистика бібліотеки і місце на диску
 vot update                   Оновити vot-mpv (git pull + переінсталяція)
 ```
 
@@ -107,7 +109,8 @@ vot update                   Оновити vot-mpv (git pull + переінст
 ### ytv — пошук YouTube з інтеграцією бібліотеки
 
 ```bash
-ytv hyprland tutorial
+ytv hyprland tutorial   # пошук
+ytv                     # показати історію пошуку
 ```
 
 Відкриває fzf зі списком результатів:
@@ -122,6 +125,7 @@ ytv hyprland tutorial
 |---------|-----|
 | `Enter` | Відкрити відео в mpv |
 | `Ctrl+A` | Додати в бібліотеку (залишається в fzf, ★ з'являється) |
+| `Ctrl+L` | Змінити ліміт результатів (зберігається в vot.conf) |
 | `Esc` | Вийти |
 
 ---
@@ -135,6 +139,7 @@ language=ru          # мова озвучки перекладу (ru / en / kk)
 autoTranslate=yes    # автоматично перекладати при відкритті відео (yes/no)
 skipLangs=ru         # НЕ перекладати відео цими мовами (через кому: ru,en)
 quality=1080         # якість для перегляду і скачування (480/720/1080/2160/best)
+search_limit=20      # кількість результатів у ytv (змінюється через Ctrl+L в пошуку)
 vot_bin=/usr/bin/node
 vot_script=/home/multi-man/.local/share/vot-mpv/vot-translate.js
 ```

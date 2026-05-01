@@ -1,20 +1,41 @@
 #!/bin/bash
 # ytv — YouTube search integrated with vot library
-# Enter = відкрити в mpv   Ctrl+A = додати в бібліотеку   ★ = вже є
-
-QUERY="$*"
-if [ -z "$QUERY" ]; then
-  echo "Використання: ytv <пошук>"
-  echo "Приклад:      ytv hyprland tutorial"
-  exit 1
-fi
+# Enter = відкрити в mpv   Ctrl+A = додати в бібліотеку   Ctrl+L = змінити ліміт   ★ = вже є
 
 VOT_CLI="$HOME/.local/share/vot-mpv/vot-cli.js"
 FMT="$HOME/.local/share/vot-mpv/integrations/ytv-fmt"
 THUMB_DIR="$HOME/.cache/vot/thumbs"
 CONF="$HOME/.config/mpv/script-opts/vot.conf"
-RESULTS=$(mktemp /tmp/ytv-results.XXXXXX)
-trap "rm -f $RESULTS" EXIT
+HISTORY="$HOME/.cache/vot/ytv-history"
+
+mkdir -p "$THUMB_DIR" "$(dirname "$HISTORY")"
+
+# ── No args → show history picker ────────────────────────────────────────────
+
+if [ -z "$*" ]; then
+  if [ ! -s "$HISTORY" ]; then
+    echo "Немає історії пошуку. Введіть запит: ytv <запит>"
+    exit 0
+  fi
+  QUERY=$(tac "$HISTORY" | awk '!seen[$0]++' | fzf \
+    --prompt="Історія › " \
+    --height=40% \
+    --border=rounded \
+    --header="Enter = пошукувати знову   Esc = вийти" \
+    --no-info)
+  [ -z "$QUERY" ] && exit 0
+  exec "$0" "$QUERY"
+fi
+
+QUERY="$*"
+
+# ── Save to history (newest first, max 200 unique) ───────────────────────────
+
+{ echo "$QUERY"; [ -f "$HISTORY" ] && cat "$HISTORY"; } \
+  | awk '!seen[$0]++' | head -200 > "$HISTORY.tmp" \
+  && mv "$HISTORY.tmp" "$HISTORY"
+
+# ── Read settings ─────────────────────────────────────────────────────────────
 
 QUALITY=$(grep "^quality=" "$CONF" 2>/dev/null | cut -d= -f2 | tr -d ' ')
 QUALITY="${QUALITY:-1080}"
@@ -24,9 +45,50 @@ else
   YTDL_FORMAT="bestvideo[height<=${QUALITY}]+bestaudio/best[height<=${QUALITY}]"
 fi
 
-mkdir -p "$THUMB_DIR"
+LIMIT=$(grep "^search_limit=" "$CONF" 2>/dev/null | cut -d= -f2 | tr -d ' ')
+LIMIT="${LIMIT:-20}"
 
-# Preview: download thumbnail and show via kitty icat
+# ── Temp files ────────────────────────────────────────────────────────────────
+
+RESULTS=$(mktemp /tmp/ytv-results.XXXXXX)
+SEARCH_SCRIPT=$(mktemp /tmp/ytv-search.XXXXXX.sh)
+LIMIT_SCRIPT=$(mktemp /tmp/ytv-limit.XXXXXX.sh)
+trap "rm -f $RESULTS $SEARCH_SCRIPT $LIMIT_SCRIPT" EXIT
+
+# ── Search script (also used for fzf reload) ──────────────────────────────────
+
+cat > "$SEARCH_SCRIPT" << ENDSEARCH
+#!/bin/bash
+LIM=\$(grep '^search_limit=' "$CONF" 2>/dev/null | cut -d= -f2 | tr -d ' ')
+LIM=\${LIM:-20}
+yt-dlp --lazy-playlist "ytsearch\${LIM}:$QUERY" \\
+  --print "%(id)s\t%(title)s\t%(uploader)s\t%(duration_string)s" \\
+  --no-playlist --quiet 2>/dev/null | tee "$RESULTS" | "$FMT"
+ENDSEARCH
+chmod +x "$SEARCH_SCRIPT"
+
+# ── Limit change script ───────────────────────────────────────────────────────
+
+cat > "$LIMIT_SCRIPT" << ENDLIMIT
+#!/bin/bash
+CONF="$CONF"
+NEW=\$(printf '10\n20\n30\n40\n50\n100' | fzf \\
+  --prompt='Ліміт результатів › ' \\
+  --height=30% \\
+  --border=rounded \\
+  --header="Поточний: \$(grep search_limit \$CONF 2>/dev/null | cut -d= -f2 || echo 20)" \\
+  --no-info)
+[ -z "\$NEW" ] && exit 0
+if grep -q '^search_limit=' "\$CONF"; then
+  sed -i "s/^search_limit=.*/search_limit=\$NEW/" "\$CONF"
+else
+  echo "search_limit=\$NEW" >> "\$CONF"
+fi
+ENDLIMIT
+chmod +x "$LIMIT_SCRIPT"
+
+# ── Preview ───────────────────────────────────────────────────────────────────
+
 PREVIEW='
   id=$(echo {} | cut -f2)
   [ -z "$id" ] && exit 0
@@ -36,26 +98,22 @@ PREVIEW='
     --place "${FZF_PREVIEW_COLUMNS}x${FZF_PREVIEW_LINES}@0x0" "$cache" 2>/dev/null
 '
 
-# Stream results: yt-dlp outputs line by line via --lazy-playlist,
-# tee saves to file (for reload), formatter adds ★ markers in real time
-yt-dlp --lazy-playlist "ytsearch20:$QUERY" \
-  --print "%(id)s	%(title)s	%(uploader)s	%(duration_string)s" \
-  --no-playlist --quiet 2>/dev/null \
-  | tee "$RESULTS" \
-  | "$FMT" \
-  | fzf \
-    --delimiter=$'\t' \
-    --with-nth=1 \
-    --prompt="ytv › " \
-    --header="Enter = відкрити в mpv   Ctrl+A = додати в бібліотеку   ★ = вже є" \
-    --height=100% \
-    --border=rounded \
-    --preview "$PREVIEW" \
-    --preview-window=right:40%:wrap \
-    --bind "ctrl-a:execute-silent(
-      id=\$(echo {} | cut -f2);
-      node \"$VOT_CLI\" add \"https://www.youtube.com/watch?v=\$id\"
-    )+reload(\"$FMT\" \"$RESULTS\")" \
+# ── Run fzf ───────────────────────────────────────────────────────────────────
+
+"$SEARCH_SCRIPT" | fzf \
+  --delimiter=$'\t' \
+  --with-nth=1 \
+  --prompt="ytv › $QUERY  " \
+  --header="Enter=відкрити  Ctrl+A=додати  Ctrl+L=ліміт (${LIMIT})  Esc=вийти" \
+  --height=100% \
+  --border=rounded \
+  --preview "$PREVIEW" \
+  --preview-window=right:40%:wrap \
+  --bind "ctrl-a:execute-silent(
+    id=\$(echo {} | cut -f2)
+    node \"$VOT_CLI\" add \"https://www.youtube.com/watch?v=\$id\"
+  )+reload(\"$FMT\" \"$RESULTS\")" \
+  --bind "ctrl-l:execute($LIMIT_SCRIPT)+reload($SEARCH_SCRIPT)" \
   > /tmp/ytv-selected.$$
 
 SELECTED=$(cat /tmp/ytv-selected.$$)

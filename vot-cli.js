@@ -320,6 +320,44 @@ function cmdClean() {
   console.log(count ? `✓ Видалено ${count} файлів` : "Нічого для очищення");
 }
 
+function cmdStatus() {
+  const lib = loadLib();
+  const total = lib.videos.length;
+  const withTrans = lib.videos.filter(v => hasCachedTranslation(v.id, !!(v.videoPath))).length;
+  const withVideo = lib.videos.filter(v => v.videoPath && fs.existsSync(v.videoPath)).length;
+  const failed = lib.videos.filter(v => v.translationFailed).length;
+
+  const sumDir = (dir, ext) => {
+    try {
+      return fs.readdirSync(dir)
+        .filter(f => !ext || f.endsWith(ext))
+        .reduce((s, f) => { try { return s + fs.statSync(path.join(dir, f)).size; } catch { return s; } }, 0);
+    } catch { return 0; }
+  };
+  const fmt = b => {
+    if (b < 1024) return b + " Б";
+    if (b < 1024 ** 2) return (b / 1024).toFixed(1) + " КБ";
+    if (b < 1024 ** 3) return (b / 1024 ** 2).toFixed(1) + " МБ";
+    return (b / 1024 ** 3).toFixed(2) + " ГБ";
+  };
+
+  const cacheSize = sumDir(CACHE_DIR, ".mp3");
+  const thumbSize = sumDir(THUMB_DIR, ".jpg");
+  const videoSize = sumDir(VIDEOS_DIR, null);
+
+  console.log(`
+  Відео в бібліотеці:  ${total}
+  З перекладом:        ${withTrans}/${total}${failed ? "  (провалів: " + failed + ")" : ""}
+  Скачано локально:    ${withVideo}/${total}
+
+  Місце на диску:
+    Переклади (MP3):   ${fmt(cacheSize)}
+    Відео:             ${fmt(videoSize)}
+    Thumbnails:        ${fmt(thumbSize)}
+    Разом:             ${fmt(cacheSize + videoSize + thumbSize)}
+`);
+}
+
 function fetchOne(video) {
   const lang = readConf().language || "ru";
   return new Promise((resolve) => {
@@ -352,6 +390,11 @@ async function cmdFetch(id) {
   console.log(ok ? "✓ Готово" : "✗ Провал");
 }
 
+function bar(done, total, width = 24) {
+  const filled = total > 0 ? Math.round((done / total) * width) : 0;
+  return "█".repeat(filled) + "░".repeat(width - filled);
+}
+
 async function cmdFetchAll() {
   const lib = loadLib();
   const toFetch = lib.videos.filter(v => !hasCachedTranslation(v.id, !!(v.videoPath)));
@@ -361,22 +404,28 @@ async function cmdFetchAll() {
     return;
   }
 
-  console.log(`\nПерекладаємо ${toFetch.length} відео (макс 5хв на кожне)...\n`);
+  const total = toFetch.length;
+  const pad = String(total).length;
+  console.log(`\nПерекладаємо ${total} відео (макс 5хв на кожне)...\n`);
 
-  for (let i = 0; i < toFetch.length; i++) {
+  let successCount = 0;
+  for (let i = 0; i < total; i++) {
     const v = toFetch[i];
-    process.stdout.write(`[${i + 1}/${toFetch.length}] ${v.title}\n         → `);
+    const label = `[${String(i + 1).padStart(pad)}/${total}]`;
+    const title = v.title.slice(0, 48).padEnd(49);
+    process.stdout.write(`${label} ${bar(i, total)}  ${title}  `);
 
     const ok = await fetchOne(v);
-    console.log(ok ? "✓" : "✗ провал, пропускаємо");
+    console.log(ok ? "✓" : "✗");
+    if (ok) successCount++;
 
     const entry = lib.videos.find(e => e.id === v.id);
     if (entry) entry.translationFailed = !ok;
     saveLib(lib);
   }
 
-  const failed = lib.videos.filter(v => v.translationFailed).length;
-  console.log(`\nГотово. ${toFetch.length - failed} успішно${failed ? ", " + failed + " провалів" : ""}.`);
+  const failed = total - successCount;
+  console.log(`\n${" ".repeat(pad + 2)}${bar(total, total)}  Готово: ${successCount}/${total}${failed ? "  (провалів: " + failed + ")" : ""}`);
 }
 
 function cmdDownload(id, quality) {
@@ -481,6 +530,7 @@ function help() {
 vot — менеджер відео з перекладом
 
   add <url> [url2...]      Додати YouTube відео (можна кілька одразу)
+  add --file <шлях>        Додати всі URL з текстового файлу (по одному на рядок)
   add-playlist <url>       Додати всі відео з плейлісту
   list                     Показати всі відео зі статусами
   pick                     fzf: Enter=відкрити  Ctrl+D=видалити все
@@ -494,6 +544,7 @@ vot — менеджер відео з перекладом
   remove-translation <id>  Видалити тільки переклад
   clean                    Видалити переклади і thumbnails не з бібліотеки
   sync-thumbs              Завантажити thumbnails для всіх відео без них
+  status                   Статистика бібліотеки і місце на диску
   update                   Оновити vot-mpv через git pull + переінсталяція
 
 Іконки: 🌐 онлайн  💾 локальне  ✓ переклад є  ✗ провал  — немає
@@ -506,9 +557,18 @@ const [,, cmd, arg, qualityArg] = process.argv;
 (async () => {
   switch (cmd) {
     case "add": {
-      const urls = process.argv.slice(3);
-      if (!urls.length) die("Вкажіть URL(и)");
-      for (const u of urls) await cmdAdd(u);
+      const rest = process.argv.slice(3);
+      if (!rest.length) die("Вкажіть URL або --file <шлях>");
+      if (rest[0] === "--file") {
+        const fp = rest[1];
+        if (!fp) die("Вкажіть шлях до файлу після --file");
+        const urls = fs.readFileSync(fp, "utf8")
+          .split("\n").map(l => l.trim()).filter(l => l && !l.startsWith("#"));
+        console.log(`Додаємо ${urls.length} відео з файлу...\n`);
+        for (const u of urls) await cmdAdd(u);
+      } else {
+        for (const u of rest) await cmdAdd(u);
+      }
       break;
     }
     case "add-playlist":           if (!arg) die("Вкажіть URL плейлісту"); await cmdAddPlaylist(arg); break;
@@ -530,6 +590,7 @@ const [,, cmd, arg, qualityArg] = process.argv;
       break;
     case "download":               if (!arg) die("Вкажіть ID"); cmdDownload(arg, qualityArg); break;
     case "sync-thumbs":            await cmdSyncThumbs(); break;
+    case "status":                 cmdStatus(); break;
     case "update":                 cmdUpdate(); break;
     default:                       help(); break;
   }
