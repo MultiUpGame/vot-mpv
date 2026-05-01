@@ -6,11 +6,32 @@ local home = os.getenv("HOME") or ""
 local opts = {
     language = "ru",
     autoTranslate = false,
+    skipLangs = "ru",
     quality = "1080",
     vot_bin = "/usr/bin/node",
     vot_script = home .. "/.local/share/vot-mpv/vot-translate.js",
 }
 require('mp.options').read_options(opts, "vot")
+
+-- ISO 639-2 → 639-1 (mpv повертає 3-літерні коди для стрімів)
+local lang3to2 = {
+    eng="en", rus="ru", zho="zh", kor="ko", lit="lt", lav="lv",
+    ara="ar", fra="fr", ita="it", spa="es", deu="de", jpn="ja", kaz="kk",
+    ukr="uk", pol="pl", nld="nl", por="pt", tur="tr", swe="sv",
+}
+
+local function audio_lang()
+    local lang = mp.get_property("current-tracks/audio/lang") or ""
+    return lang3to2[lang] or lang
+end
+
+local function in_skip_list(lang)
+    if lang == "" then return false end
+    for skip in opts.skipLangs:gmatch("[^,%s]+") do
+        if skip == lang then return true end
+    end
+    return false
+end
 
 local vot_file = nil
 local translating = false
@@ -151,7 +172,12 @@ mp.register_event("file-loaded", function()
     cleanup()
     if opts.autoTranslate then
         if get_youtube_url(mp.get_property("path") or "") then
-            start_translation()
+            local lang = audio_lang()
+            if in_skip_list(lang) then
+                msg.info("VOT: пропускаємо (" .. lang .. " в skipLangs)")
+            else
+                start_translation()
+            end
         end
     end
 end)

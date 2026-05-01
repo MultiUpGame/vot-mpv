@@ -120,7 +120,8 @@ ytv hyprland tutorial
 
 ```ini
 language=ru          # мова озвучки перекладу (ru / en / kk)
-autoTranslate=no     # автоматично перекладати при відкритті відео (yes/no)
+autoTranslate=yes    # автоматично перекладати при відкритті відео (yes/no)
+skipLangs=ru         # НЕ перекладати відео цими мовами (через кому: ru,en)
 quality=1080         # якість для перегляду і скачування (480/720/1080/2160/best)
 vot_bin=/usr/bin/node
 vot_script=/home/multi-man/.local/share/vot-mpv/vot-translate.js
@@ -131,7 +132,10 @@ vot_script=/home/multi-man/.local/share/vot-mpv/vot-translate.js
 | Параметр | Значення |
 |----------|---------|
 | `language` (озвучка) | `ru`, `en`, `kk` — більше Яндекс не підтримує |
-| Вхідна мова відео | визначається автоматично: en, zh, ko, de, fr, es, it, ja, ar та інші |
+| Вхідна мова відео | визначається автоматично: `en`, `zh`, `ko`, `de`, `fr`, `es`, `it`, `ja`, `ar` та інші |
+
+`skipLangs=ru` — дефолт, щоб не перекладати російські відео на російську.
+Додай будь-які інші коди якщо хочеш пропускати: `skipLangs=ru,uk,de`
 
 Українська озвучка недоступна — Яндекс її не має в TTS.
 

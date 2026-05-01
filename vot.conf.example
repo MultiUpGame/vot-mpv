@@ -1,5 +1,6 @@
 language=ru
-autoTranslate=no
+autoTranslate=yes
+skipLangs=ru
 quality=1080
 vot_bin=/usr/bin/node
 vot_script=/home/multi-man/.local/share/vot-mpv/vot-translate.js
