@@ -1,0 +1,4 @@
+ctrl+t script-binding vot/toggle
+ctrl+е script-binding vot/toggle
+ctrl+т script-binding vot/toggle
+ctrl+с script-binding vot/toggle

@@ -1,0 +1,4 @@
+language=ru
+autoTranslate=no
+vot_bin=/usr/bin/node
+vot_script=/home/multi-man/.local/share/vot-mpv/vot-translate.js

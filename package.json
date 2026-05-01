@@ -1,0 +1,12 @@
+{
+  "name": "vot-mpv",
+  "version": "1.0.0",
+  "description": "YouTube voice-over translation (EN→RU) for mpv via Yandex Browser Translation API",
+  "keywords": ["mpv", "youtube", "translation", "yandex", "voice-over"],
+  "author": "multi-man",
+  "license": "MIT",
+  "type": "commonjs",
+  "dependencies": {
+    "@vot.js/node": "^2.4.12"
+  }
+}
