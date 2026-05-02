@@ -78,8 +78,8 @@ SEARCH_CACHE="${CACHE_DIR_YTV}/ytv-${QUERY_HASH}.tsv"
   printf 'LIM=${LIM:-20}\n'
   printf 'yt-dlp --lazy-playlist "ytsearch${LIM}:%s" \\\n' "$QUERY"
   printf '  --print "%%(id)s${TAB}%%(title)s${TAB}%%(uploader)s${TAB}%%(duration_string)s" \\\n'
-  printf '  --no-playlist --quiet 2>/dev/null > "%s.new" \\\n' "$RESULTS"
-  printf '  && mv "%s.new" "%s" && cp "%s" "%s"\n' "$RESULTS" "$RESULTS" "$RESULTS" "$SEARCH_CACHE"
+  printf '  --no-playlist --quiet 2>/dev/null > "%s.new" \\\n' "$SEARCH_CACHE"
+  printf '  && mv "%s.new" "%s"\n' "$SEARCH_CACHE" "$SEARCH_CACHE"
 } > "$BG_SCRIPT"
 chmod +x "$BG_SCRIPT"
 

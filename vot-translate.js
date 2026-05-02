@@ -63,9 +63,8 @@ function getCacheFile(videoId) {
 
 function isCacheValid(cacheFile, videoId) {
   try {
-    fs.statSync(cacheFile);
-    if (isVideoPermanent(videoId)) return true;
     const stat = fs.statSync(cacheFile);
+    if (isVideoPermanent(videoId)) return true;
     return Date.now() - stat.mtimeMs < CACHE_MAX_AGE_MS;
   } catch {
     return false;

@@ -158,17 +158,17 @@ local function start_translation(auto_mode)
     if old then mp.commandv("audio-remove", old) end
     cleanup()
 
-    -- Pause video if auto-translate and no cached translation
+    -- Pause video if auto-translate and no valid cached translation (respects 7-day TTL)
     if auto_mode then
         local vid_id = url:match("[?&]v=([A-Za-z0-9_%-]+)")
         local cache_mp3 = vid_id and (home .. "/.cache/vot/" .. vid_id .. ".mp3") or nil
         if cache_mp3 then
-            local f = io.open(cache_mp3, "r")
-            if not f then
+            local info = utils.file_info(cache_mp3)
+            local cache_ok = info and info.is_file and
+                (os.time() - info.mtime < 7 * 24 * 3600)
+            if not cache_ok then
                 mp.set_property_bool("pause", true)
                 auto_paused = true
-            else
-                f:close()
             end
         end
     end
